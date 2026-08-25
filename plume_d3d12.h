@@ -88,6 +88,14 @@ namespace plume {
         std::vector<uint32_t> descriptorHeapIndices;
         uint32_t descriptorTypeMaxIndex = 0;
 
+        // False when a heap allocation failed in the constructor. The set must
+        // not be handed out in that case: its allocation offset is INVALID_OFFSET
+        // and every setTexture/setSampler on it writes through a descriptor
+        // handle derived from that, i.e. wild. The shader-visible sampler heap is
+        // only 1024 descriptors, so this is reachable by any consumer that caches
+        // sets with a full sampler range in them.
+        bool valid = true;
+
         D3D12DescriptorSet(D3D12Device *device, const RenderDescriptorSetDesc &desc);
         ~D3D12DescriptorSet() override;
         void setBuffer(uint32_t descriptorIndex, const RenderBuffer *buffer, uint64_t bufferSize, const RenderBufferStructuredView *bufferStructuredView, const RenderBufferFormattedView *bufferFormattedView) override;

@@ -124,6 +124,8 @@ namespace plume {
             return DXGI_FORMAT_R8G8B8A8_SINT;
         case RenderFormat::B8G8R8A8_UNORM:
             return DXGI_FORMAT_B8G8R8A8_UNORM;
+        case RenderFormat::R10G10B10A2_UNORM:
+            return DXGI_FORMAT_R10G10B10A2_UNORM;
         case RenderFormat::R16G16_TYPELESS:
             return DXGI_FORMAT_R16G16_TYPELESS;
         case RenderFormat::R16G16_FLOAT:
@@ -937,7 +939,8 @@ namespace plume {
         if (viewDescriptorCount > 0) {
             viewAllocation.offset = device->viewHeapAllocator->allocate(viewDescriptorCount);
             if (viewAllocation.offset == D3D12DescriptorHeapAllocator::INVALID_OFFSET) {
-                fprintf(stderr, "Allocator was unable to find free space for the set.");
+                fprintf(stderr, "Allocator was unable to find free space for the set's %u view descriptor(s).\n", viewDescriptorCount);
+                valid = false;
                 return;
             }
 
@@ -947,7 +950,8 @@ namespace plume {
         if (samplerDescriptorCount > 0) {
             samplerAllocation.offset = device->samplerHeapAllocator->allocate(samplerDescriptorCount);
             if (samplerAllocation.offset == D3D12DescriptorHeapAllocator::INVALID_OFFSET) {
-                fprintf(stderr, "Allocator was unable to find free space for the set.");
+                fprintf(stderr, "Allocator was unable to find free space for the set's %u sampler descriptor(s); the sampler heap holds %u.\n", samplerDescriptorCount, SamplerDescriptorHeapSize);
+                valid = false;
                 return;
             }
 
@@ -3199,7 +3203,25 @@ namespace plume {
 
         psoDesc.InputLayout = { inputElements.data(), UINT(inputElements.size()) };
 
-        device->d3d->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&d3d));
+        HRESULT psoRes = device->d3d->CreateGraphicsPipelineState(&psoDesc, IID_PPV_ARGS(&d3d));
+        if (FAILED(psoRes)) {
+            fprintf(stderr, "CreateGraphicsPipelineState failed with 0x%08lX.\n", (unsigned long)(psoRes));
+            ID3D12InfoQueue *psoInfoQueue = nullptr;
+            if (SUCCEEDED(device->d3d->QueryInterface(IID_PPV_ARGS(&psoInfoQueue)))) {
+                const UINT64 messageCount = psoInfoQueue->GetNumStoredMessages();
+                for (UINT64 i = 0; i < messageCount; i++) {
+                    SIZE_T length = 0;
+                    psoInfoQueue->GetMessage(i, nullptr, &length);
+                    std::vector<char> storage(length);
+                    D3D12_MESSAGE *message = reinterpret_cast<D3D12_MESSAGE *>(storage.data());
+                    if (SUCCEEDED(psoInfoQueue->GetMessage(i, message, &length))) {
+                        fprintf(stderr, "D3D12: %s\n", message->pDescription);
+                    }
+                }
+                psoInfoQueue->ClearStoredMessages();
+                psoInfoQueue->Release();
+            }
+        }
     }
 
     D3D12GraphicsPipeline::~D3D12GraphicsPipeline() {
@@ -3894,7 +3916,15 @@ namespace plume {
     }
 
     std::unique_ptr<RenderDescriptorSet> D3D12Device::createDescriptorSet(const RenderDescriptorSetDesc &desc) {
-        return std::make_unique<D3D12DescriptorSet>(this, desc);
+        // A set whose heap allocation failed must not be returned as a live
+        // object: every write to it goes through an INVALID_OFFSET handle, which
+        // faults inside the driver rather than anywhere attributable.
+        std::unique_ptr<D3D12DescriptorSet> descriptorSet = std::make_unique<D3D12DescriptorSet>(this, desc);
+        if (!descriptorSet->valid) {
+            return nullptr;
+        }
+
+        return descriptorSet;
     }
 
     std::unique_ptr<RenderShader> D3D12Device::createShader(const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format) {
@@ -3910,7 +3940,15 @@ namespace plume {
     }
 
     std::unique_ptr<RenderPipeline> D3D12Device::createGraphicsPipeline(const RenderGraphicsPipelineDesc &desc) {
-        return std::make_unique<D3D12GraphicsPipeline>(this, desc);
+        // Report a rejected state object as a null pipeline rather than as an
+        // object with no state behind it: the caller has no other way to tell,
+        // and binding one crashes inside SetPipelineState.
+        std::unique_ptr<D3D12GraphicsPipeline> pipeline = std::make_unique<D3D12GraphicsPipeline>(this, desc);
+        if (pipeline->d3d == nullptr) {
+            return nullptr;
+        }
+
+        return pipeline;
     }
 
     std::unique_ptr<RenderPipeline> D3D12Device::createRaytracingPipeline(const RenderRaytracingPipelineDesc &desc, const RenderPipeline *previousPipeline) {
@@ -3922,11 +3960,18 @@ namespace plume {
     }
     
     std::unique_ptr<RenderBuffer> D3D12Device::createBuffer(const RenderBufferDesc &desc) {
+        // A buffer whose resource failed to allocate must not be handed back as
+        // a live object: every caller's "did this work?" check is a null test on
+        // the returned pointer, and map() dereferences d3d unconditionally, so a
+        // half-constructed buffer turns an allocation failure into a null deref
+        // somewhere else entirely. This mirrors createGraphicsPipelineState.
         if ((desc.heapType == RenderHeapType::GPU_UPLOAD) && gpuUploadHeapFallback) {
-            return std::make_unique<D3D12Buffer>(this, customUploadPool.get(), desc);
+            auto buffer = std::make_unique<D3D12Buffer>(this, customUploadPool.get(), desc);
+            return (buffer->d3d != nullptr) ? std::move(buffer) : nullptr;
         }
         else {
-            return std::make_unique<D3D12Buffer>(this, nullptr, desc);
+            auto buffer = std::make_unique<D3D12Buffer>(this, nullptr, desc);
+            return (buffer->d3d != nullptr) ? std::move(buffer) : nullptr;
         }
     }
 
