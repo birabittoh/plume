@@ -27,15 +27,31 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
-# Enable SDL Vulkan support
+# Enable SDL Vulkan support. Uses SDL3 (not SDL2) so it shares the same
+# SDL_Window objects as the host application's own SDL3-based windowing --
+# mixing an SDL3 SDL_Window* into SDL2's Vulkan calls is an ABI mismatch that
+# manifests as an unexplained hang or crash inside SDL, not a clean error.
+#
+# Deliberately header-only, no target_link_libraries: the host application
+# already links the one real SDL3 shared library (via the ReXGlue SDK), and
+# these symbols resolve against it at the final executable link. Linking the
+# static SDL3 target here too would bake a second, separately-initialized
+# copy of SDL3 into the binary -- its own Vulkan function table never gets
+# populated (SDL_Init runs against the SDK's copy, not this one), and calling
+# through it null-derefs on the first Vulkan call.
 if(PLUME_SDL_VULKAN_ENABLED)
-    if (NOT TARGET SDL2::SDL2)
-        find_package(SDL2 REQUIRED)
-    else()
-        set(SDL2_INCLUDE_DIRS "$<TARGET_PROPERTY:SDL2::SDL2,INTERFACE_INCLUDE_DIRECTORIES>")
+    # SDL3::SDL3-static (imported via the ReXGlue SDK's find_dependency(SDL3))
+    # doesn't carry its own INTERFACE_INCLUDE_DIRECTORIES here; rex::runtime's
+    # does, and already covers the SDK's full include/ tree (SDL3/ included).
+    if(TARGET rex::runtime)
+        get_target_property(PLUME_SDL3_INCLUDE_DIRS rex::runtime INTERFACE_INCLUDE_DIRECTORIES)
+    endif()
+    if(NOT PLUME_SDL3_INCLUDE_DIRS)
+        find_package(SDL3 REQUIRED CONFIG)
+        get_target_property(PLUME_SDL3_INCLUDE_DIRS SDL3::SDL3 INTERFACE_INCLUDE_DIRECTORIES)
     endif()
 
-    message(STATUS "Plume - Building with SDL2_INCLUDE_DIRS: ${SDL2_INCLUDE_DIRS}")
+    message(STATUS "Plume - Building with SDL3_INCLUDE_DIRS: ${PLUME_SDL3_INCLUDE_DIRS}")
 endif()
 
 # Enable D3D12 Agility SDK support
@@ -91,7 +107,7 @@ endif()
 
 if(PLUME_SDL_VULKAN_ENABLED)
     target_compile_definitions(plume PUBLIC PLUME_SDL_VULKAN_ENABLED)
-    target_include_directories(plume PUBLIC ${SDL2_INCLUDE_DIRS})
+    target_include_directories(plume PUBLIC ${PLUME_SDL3_INCLUDE_DIRS})
 endif()
 
 if(PLUME_D3D12_AGILITY_SDK_ENABLED)

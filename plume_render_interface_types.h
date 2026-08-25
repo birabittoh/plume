@@ -30,7 +30,7 @@
 #endif
 
 #ifdef PLUME_SDL_VULKAN_ENABLED
-#include <SDL_vulkan.h>
+#include <SDL3/SDL_vulkan.h>
 #endif
 
 namespace plume {

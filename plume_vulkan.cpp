@@ -2100,8 +2100,8 @@ namespace plume {
         }
 #   elif defined(PLUME_SDL_VULKAN_ENABLED)
         VulkanInterface *renderInterface = commandQueue->device->renderInterface;
-        SDL_bool sdlRes = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, &surface);
-        if (sdlRes == SDL_FALSE) {
+        bool sdlRes = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, nullptr, &surface);
+        if (!sdlRes) {
             fprintf(stderr, "SDL_Vulkan_CreateSurface failed with error %s.\n", SDL_GetError());
             return;
         }
@@ -4504,18 +4504,15 @@ namespace plume {
 #   endif
 
 #   if PLUME_SDL_VULKAN_ENABLED
-        // Push the extensions specified by SDL as required.
-        // SDL2 has this awkward requirement for the window to pull the extensions from. 
-        // This can be removed when upgrading to SDL3.
-        if (sdlWindow != nullptr) {
-            uint32_t sdlVulkanExtensionCount = 0;
-            if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &sdlVulkanExtensionCount, nullptr)) {
-                std::vector<char *> sdlVulkanExtensions;
-                sdlVulkanExtensions.resize(sdlVulkanExtensionCount);
-                if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &sdlVulkanExtensionCount, (const char **)(sdlVulkanExtensions.data()))) {
-                    for (char *sdlVulkanExtension : sdlVulkanExtensions) {
-                        requiredExtensions.insert(sdlVulkanExtension);
-                    }
+        // Push the extensions SDL says the current video driver (X11, Wayland,
+        // ...) needs. Unlike SDL2, SDL3 doesn't need a window to ask this --
+        // it just reflects whichever backend SDL_Init already picked.
+        {
+            Uint32 sdlVulkanExtensionCount = 0;
+            char const *const *sdlVulkanExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlVulkanExtensionCount);
+            if (sdlVulkanExtensions != nullptr) {
+                for (Uint32 i = 0; i < sdlVulkanExtensionCount; i++) {
+                    requiredExtensions.insert(sdlVulkanExtensions[i]);
                 }
             }
         }
