@@ -128,10 +128,25 @@ namespace plume {
         ~VulkanDescriptorSetLayout();
     };
 
+    // Where a root descriptor lands in Vulkan: a binding in a push descriptor
+    // set, whose set index is the root descriptor's register space.
+    struct VulkanRootDescriptorBinding {
+        uint32_t setIndex = 0;
+        uint32_t binding = 0;
+        VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
+    };
+
     struct VulkanPipelineLayout : RenderPipelineLayout {
         VkPipelineLayout vk = VK_NULL_HANDLE;
         std::vector<VkPushConstantRange> pushConstantRanges;
         std::vector<VulkanDescriptorSetLayout *> descriptorSetLayouts;
+        // Parallel to the desc's root descriptors, so an index from the caller
+        // is a direct lookup.
+        std::vector<VulkanRootDescriptorBinding> rootDescriptorBindings;
+        // The set layouts this object creates itself: the push descriptor sets
+        // backing the root descriptors, plus empty filler layouts for any set
+        // index left unclaimed between them and the regular sets.
+        std::vector<VkDescriptorSetLayout> ownedSetLayouts;
         VulkanDevice *device = nullptr;
 
         VulkanPipelineLayout(VulkanDevice *device, const RenderPipelineLayoutDesc &desc);
@@ -345,6 +360,7 @@ namespace plume {
         void checkActiveRenderPass();
         void endActiveRenderPass();
         void setDescriptorSet(VkPipelineBindPoint bindPoint, const VulkanPipelineLayout *pipelineLayout, const RenderDescriptorSet *descriptorSet, uint32_t setIndex);
+        void setRootDescriptor(VkPipelineBindPoint bindPoint, const VulkanPipelineLayout *pipelineLayout, RenderBufferReference bufferReference, uint32_t rootDescriptorIndex);
     };
 
     struct VulkanCommandFence : RenderCommandFence {
@@ -417,6 +433,7 @@ namespace plume {
         std::unique_ptr<RenderBuffer> nullBuffer;
         bool loadStoreOpNoneSupported = false;
         bool nullDescriptorSupported = false;
+        bool pushDescriptorSupported = false;
 
         VulkanDevice(VulkanInterface *renderInterface, const std::string &preferredDeviceName);
         ~VulkanDevice() override;
