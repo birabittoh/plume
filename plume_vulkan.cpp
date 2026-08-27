@@ -2440,7 +2440,18 @@ namespace plume {
 
         createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
         createInfo.surface = surface;
+        // Mailbox needs a third image to be worth anything: with two, the queued image is always the
+        // one being scanned out, so acquiring blocks on the vblank and the mode degrades to FIFO.
+        // The retrieved image count below feeds back into desc.textureCount, so asking for more here
+        // stays consistent with the textures that get created.
         createInfo.minImageCount = desc.textureCount;
+        if (requiredPresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
+            createInfo.minImageCount = std::max(createInfo.minImageCount, 3u);
+            // maxImageCount is allowed to be zero, meaning no limit.
+            if (surfaceCapabilities.maxImageCount > 0) {
+                createInfo.minImageCount = std::min(createInfo.minImageCount, surfaceCapabilities.maxImageCount);
+            }
+        }
         createInfo.imageFormat = pickedSurfaceFormat.format;
         createInfo.imageColorSpace = pickedSurfaceFormat.colorSpace;
         createInfo.imageExtent.width = width;
@@ -2519,6 +2530,14 @@ namespace plume {
         // needsResize() will return as true as long as the created and required present mode do not match.
         if (immediatePresentModeSupported && !vsyncEnabled) {
             requiredPresentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+        }
+        // Mailbox is vsync without the quantisation: the flip still lands on a vblank, so there is no
+        // tearing, but a frame that overruns replaces the queued image instead of blocking the caller
+        // for a whole refresh interval. Under FIFO with a small image count the achieved rate can only
+        // be the refresh rate divided by an integer (60/30/20), which is a hard cliff for any engine
+        // that ties its simulation step to the presentation rate. Prefer it whenever it is available.
+        else if (mailboxPresentModeSupported && vsyncEnabled) {
+            requiredPresentMode = VK_PRESENT_MODE_MAILBOX_KHR;
         }
         // FIFO is guaranteed to be supported.
         else {
