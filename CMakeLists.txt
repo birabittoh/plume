@@ -14,9 +14,16 @@ if(APPLE)
 endif()
 
 string(COMPARE EQUAL ${CMAKE_SYSTEM_NAME} "Linux" IS_LINUX)
+if(ANDROID)
+    set(IS_ANDROID TRUE)
+else()
+    set(IS_ANDROID FALSE)
+endif()
 
 # Project options
 include(CMakeDependentOption)
+# Android has native VK_KHR_android_surface support in plume_vulkan.cpp;
+# SDL Vulkan integration is only needed on desktop Linux (XCB/Wayland).
 cmake_dependent_option(PLUME_SDL_VULKAN_ENABLED "Enable SDL Vulkan integration" OFF IS_LINUX OFF)
 cmake_dependent_option(PLUME_D3D12_AGILITY_SDK_ENABLED "Enable D3D12 Agility SDK" OFF WIN32 OFF)
 cmake_dependent_option(PLUME_APPLE_RETINA_ENABLED "Enable Apple Retina display support" ON APPLE ON)

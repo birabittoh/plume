@@ -29,8 +29,17 @@ function(plume_fetch_dxc)
     )
     FetchContent_MakeAvailable(plume_dxc)
 
-    # Set up DXC paths based on platform
-    if(WIN32)
+    # DXC is a host tool (runs on the build machine, not the target).
+    # When cross-compiling (e.g. Windows -> Android), use the host platform's
+    # binary, not the target's.
+    set(_DXC_HOST_SYSTEM "${CMAKE_HOST_SYSTEM_NAME}")
+    if(CMAKE_CROSSCOMPILING)
+        set(_DXC_HOST_PROCESSOR "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    else()
+        set(_DXC_HOST_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")
+    endif()
+
+    if(_DXC_HOST_SYSTEM STREQUAL "Windows")
         set(PLUME_DXC_EXECUTABLE "${plume_dxc_SOURCE_DIR}/bin/x64/dxc.exe" CACHE INTERNAL "DXC executable")
         set(PLUME_DXC_LIB_DIR "" CACHE INTERNAL "DXC library directory")
 
@@ -41,8 +50,8 @@ function(plume_fetch_dxc)
         if(EXISTS "${plume_dxc_SOURCE_DIR}/bin/x64/dxil.dll")
             configure_file("${plume_dxc_SOURCE_DIR}/bin/x64/dxil.dll" "${CMAKE_BINARY_DIR}/bin/dxil.dll" COPYONLY)
         endif()
-    elseif(APPLE)
-        if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    elseif(_DXC_HOST_SYSTEM STREQUAL "Darwin")
+        if(_DXC_HOST_PROCESSOR STREQUAL "x86_64")
             set(PLUME_DXC_EXECUTABLE "${plume_dxc_SOURCE_DIR}/bin/x64/dxc-macos" CACHE INTERNAL "DXC executable")
             set(PLUME_DXC_LIB_DIR "${plume_dxc_SOURCE_DIR}/lib/x64" CACHE INTERNAL "DXC library directory")
         else()
@@ -57,8 +66,8 @@ function(plume_fetch_dxc)
             message(FATAL_ERROR "DXC not found at ${PLUME_DXC_EXECUTABLE}")
         endif()
     else()
-        # Linux
-        if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        # Linux host
+        if(_DXC_HOST_PROCESSOR STREQUAL "x86_64")
             set(PLUME_DXC_EXECUTABLE "${plume_dxc_SOURCE_DIR}/bin/x64/dxc-linux" CACHE INTERNAL "DXC executable")
             set(PLUME_DXC_LIB_DIR "${plume_dxc_SOURCE_DIR}/lib/x64" CACHE INTERNAL "DXC library directory")
         else()

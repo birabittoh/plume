@@ -15,13 +15,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/modules/PlumeSpirvCross.cmake")
 
 function(_plume_embed TARGET_NAME INPUT_FILE VAR_NAME OUTPUT_C OUTPUT_H)
     plume_build_file_to_c()
+    plume_get_file_to_c_command(FILE_TO_C_CMD)
 
     get_filename_component(OUT_DIR "${OUTPUT_C}" DIRECTORY)
     file(MAKE_DIRECTORY "${OUT_DIR}")
 
     add_custom_command(
         OUTPUT "${OUTPUT_C}" "${OUTPUT_H}"
-        COMMAND plume_file_to_c "${INPUT_FILE}" "${VAR_NAME}" "${OUTPUT_C}" "${OUTPUT_H}"
+        COMMAND ${FILE_TO_C_CMD} "${INPUT_FILE}" "${VAR_NAME}" "${OUTPUT_C}" "${OUTPUT_H}"
         DEPENDS "${INPUT_FILE}" plume_file_to_c
         COMMENT "Embedding ${VAR_NAME} from ${INPUT_FILE}"
         VERBATIM
@@ -180,6 +181,9 @@ function(_plume_compile_metal_impl TARGET_NAME SHADER_SOURCE OUTPUT_NAME)
     set(C_OUTPUT "${CMAKE_BINARY_DIR}/shaders/${OUTPUT_NAME}.metal.c")
     set(H_OUTPUT "${CMAKE_BINARY_DIR}/shaders/${OUTPUT_NAME}.metal.h")
 
+    plume_build_file_to_c()
+    plume_get_file_to_c_command(FILE_TO_C_CMD)
+
     if(CMAKE_OSX_DEPLOYMENT_TARGET)
         set(METAL_VERSION_FLAG "-mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
     else()
@@ -204,7 +208,7 @@ function(_plume_compile_metal_impl TARGET_NAME SHADER_SOURCE OUTPUT_NAME)
 
     add_custom_command(
         OUTPUT "${C_OUTPUT}" "${H_OUTPUT}"
-        COMMAND plume_file_to_c "${METALLIB_OUTPUT}" "${OUTPUT_NAME}BlobMSL" "${C_OUTPUT}" "${H_OUTPUT}"
+        COMMAND ${FILE_TO_C_CMD} "${METALLIB_OUTPUT}" "${OUTPUT_NAME}BlobMSL" "${C_OUTPUT}" "${H_OUTPUT}"
         DEPENDS "${METALLIB_OUTPUT}" plume_file_to_c
         COMMENT "Generating C header for Metal shader ${OUTPUT_NAME}"
         VERBATIM
