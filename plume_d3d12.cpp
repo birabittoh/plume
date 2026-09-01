@@ -3891,6 +3891,8 @@ namespace plume {
         capabilities.bufferDeviceAddress = true;
         capabilities.presentWait = true;
         capabilities.queryPools = true;
+        // Mandatory from feature level 11_0 onwards.
+        capabilities.textureCompressionBC = true;
         capabilities.maxTextureSize = 16384;
         capabilities.preferHDR = description.dedicatedVideoMemory > (512 * 1024 * 1024);
         capabilities.samplerMirrorClampToEdge = true;

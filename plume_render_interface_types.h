@@ -1793,6 +1793,10 @@ namespace plume {
         bool presentWait = false;
         bool displayTiming = false;
 
+        // Texture compression. Vulkan guarantees one family of BC, ETC2 or
+        // ASTC, not all three, so BC cannot be assumed.
+        bool textureCompressionBC = false;
+
         // Framebuffers.
         uint64_t maxTextureSize = 0;
 

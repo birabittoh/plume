@@ -4334,6 +4334,7 @@ namespace plume {
         capabilities.samplerMirrorClampToEdge = supportedOptionalExtensions.find(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME) != supportedOptionalExtensions.end();
         capabilities.presentWait = presentWaitSupported;
         capabilities.displayTiming = supportedOptionalExtensions.find(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) != supportedOptionalExtensions.end();
+        capabilities.textureCompressionBC = deviceFeatures.features.textureCompressionBC;
         capabilities.maxTextureSize = physicalDeviceProperties.limits.maxImageDimension2D;
         capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
         capabilities.dynamicDepthBias = true;
@@ -4396,7 +4397,15 @@ namespace plume {
     }
 
     std::unique_ptr<RenderTexture> VulkanDevice::createTexture(const RenderTextureDesc &desc) {
-        return std::make_unique<VulkanTexture>(this, nullptr, desc);
+        // A failed vmaCreateImage leaves the image handle null with the object
+        // otherwise constructed. Returning it regardless means the caller's null
+        // check never fires and the dud is used for the rest of the run.
+        std::unique_ptr<VulkanTexture> texture = std::make_unique<VulkanTexture>(this, nullptr, desc);
+        if (texture->vk == VK_NULL_HANDLE) {
+            return nullptr;
+        }
+
+        return texture;
     }
 
     std::unique_ptr<RenderAccelerationStructure> VulkanDevice::createAccelerationStructure(const RenderAccelerationStructureDesc &desc) {

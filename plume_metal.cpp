@@ -3823,6 +3823,7 @@ namespace plume {
         // https://developer.apple.com/documentation/metal/device-inspection
         // TODO: Support Raytracing.
         // capabilities.raytracing = mtl->supportsRaytracing();
+        capabilities.textureCompressionBC = mtl->supportsBCTextureCompression();
         capabilities.maxTextureSize = mtl->supportsFamily(MTL::GPUFamilyApple3) ? 16384 : 8192;
         capabilities.sampleLocations = mtl->programmableSamplePositionsSupported();
         capabilities.resolveRegion = true;
