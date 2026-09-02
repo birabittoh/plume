@@ -318,6 +318,27 @@ namespace plume {
         const VulkanPipelineLayout *activeRaytracingPipelineLayout = nullptr;
         VkRenderPass activeRenderPass = VK_NULL_HANDLE;
 
+        // Root descriptors, batched. The interface hands them over one at a
+        // time, but a push descriptor set is written as a whole, so pushing on
+        // each call turns one set of N constant buffers into N
+        // vkCmdPushDescriptorSetKHR calls per draw. They are accumulated here
+        // and pushed once, immediately before the draw or dispatch that reads
+        // them. Deferring is what makes the batch legal as well as cheap: a
+        // vkCmdBindDescriptorSets that would have disturbed the push set can no
+        // longer land between the write and its use.
+        //
+        // The bind point, layout and set index a batch targets are recorded
+        // with it; anything that changes one flushes what is already there.
+        // Sixteen is above any layout's root descriptor count, and a batch that
+        // would overflow flushes rather than dropping writes.
+        static constexpr uint32_t MaxRootDescriptorWrites = 16;
+        VkDescriptorBufferInfo rootDescriptorBufferInfos[MaxRootDescriptorWrites] = {};
+        VkWriteDescriptorSet rootDescriptorWrites[MaxRootDescriptorWrites] = {};
+        uint32_t rootDescriptorWriteCount = 0;
+        VkPipelineBindPoint rootDescriptorBindPoint = VK_PIPELINE_BIND_POINT_MAX_ENUM;
+        const VulkanPipelineLayout *rootDescriptorLayout = nullptr;
+        uint32_t rootDescriptorSetIndex = 0;
+
         VulkanCommandList(VulkanCommandQueue *queue);
         ~VulkanCommandList() override;
         void begin() override;
@@ -361,6 +382,7 @@ namespace plume {
         void endActiveRenderPass();
         void setDescriptorSet(VkPipelineBindPoint bindPoint, const VulkanPipelineLayout *pipelineLayout, const RenderDescriptorSet *descriptorSet, uint32_t setIndex);
         void setRootDescriptor(VkPipelineBindPoint bindPoint, const VulkanPipelineLayout *pipelineLayout, RenderBufferReference bufferReference, uint32_t rootDescriptorIndex);
+        void flushRootDescriptors();
     };
 
     struct VulkanCommandFence : RenderCommandFence {

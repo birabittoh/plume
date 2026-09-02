@@ -2922,6 +2922,10 @@ namespace plume {
     void VulkanCommandList::begin() {
         vkResetCommandBuffer(vk, 0);
 
+        // Anything still pending belongs to the list that was reset, and there
+        // is no draw left that could read it.
+        rootDescriptorWriteCount = 0;
+
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -2946,6 +2950,9 @@ namespace plume {
         activeComputePipelineLayout = nullptr;
         activeGraphicsPipelineLayout = nullptr;
         activeRaytracingPipelineLayout = nullptr;
+        // Dropped rather than pushed: a write with no draw after it is dead
+        // state, and the layout it names is being cleared here anyway.
+        rootDescriptorWriteCount = 0;
     }
 
     void VulkanCommandList::barriers(RenderBarrierStages stages, const RenderBufferBarrier *bufferBarriers, uint32_t bufferBarriersCount, const RenderTextureBarrier *textureBarriers, uint32_t textureBarriersCount) {
@@ -3014,6 +3021,7 @@ namespace plume {
 
     void VulkanCommandList::dispatch(uint32_t threadGroupCountX, uint32_t threadGroupCountY, uint32_t threadGroupCountZ) {
         assert(activeComputePipelineLayout != nullptr);
+        flushRootDescriptors();
 
         vkCmdDispatch(vk, threadGroupCountX, threadGroupCountY, threadGroupCountZ);
     }
@@ -3049,12 +3057,14 @@ namespace plume {
         callableSbt.deviceAddress = (callable.size > 0) ? (tableAddress + callable.offset + callable.startIndex * callable.stride) : 0;
         callableSbt.size = callable.size;
         callableSbt.stride = callable.stride;
+        flushRootDescriptors();
         vkCmdTraceRaysKHR(vk, &rayGenSbt, &missSbt, &hitSbt, &callableSbt, width, height, depth);
     }
 
     void VulkanCommandList::drawInstanced(uint32_t vertexCountPerInstance, uint32_t instanceCount, uint32_t startVertexLocation, uint32_t startInstanceLocation) {
         assert(activeGraphicsPipelineLayout != nullptr);
         checkActiveRenderPass();
+        flushRootDescriptors();
 
         vkCmdDraw(vk, vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
     }
@@ -3062,6 +3072,7 @@ namespace plume {
     void VulkanCommandList::drawIndexedInstanced(uint32_t indexCountPerInstance, uint32_t instanceCount, uint32_t startIndexLocation, int32_t baseVertexLocation, uint32_t startInstanceLocation) {
         assert(activeGraphicsPipelineLayout != nullptr);
         checkActiveRenderPass();
+        flushRootDescriptors();
 
         vkCmdDrawIndexed(vk, indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
     }
@@ -3153,19 +3164,61 @@ namespace plume {
             range = std::min(range, VkDeviceSize(queue->device->physicalDeviceProperties.limits.maxUniformBufferRange));
         }
 
-        VkDescriptorBufferInfo bufferInfo = {};
+        // A batch may only carry writes that go to one push descriptor set, so
+        // anything that changes which set that is retires what is pending.
+        if ((rootDescriptorWriteCount > 0) &&
+            ((bindPoint != rootDescriptorBindPoint) || (pipelineLayout != rootDescriptorLayout) || (rootBinding.setIndex != rootDescriptorSetIndex))) {
+            flushRootDescriptors();
+        }
+
+        rootDescriptorBindPoint = bindPoint;
+        rootDescriptorLayout = pipelineLayout;
+        rootDescriptorSetIndex = rootBinding.setIndex;
+
+        // Two writes to one binding in a single push are not allowed, so a
+        // repeat replaces the entry it repeats rather than appending. That also
+        // matches what the unbatched code did, where the later push simply won.
+        uint32_t slot = 0;
+        while ((slot < rootDescriptorWriteCount) && (rootDescriptorWrites[slot].dstBinding != rootBinding.binding)) {
+            slot++;
+        }
+
+        if (slot == rootDescriptorWriteCount) {
+            if (rootDescriptorWriteCount == MaxRootDescriptorWrites) {
+                flushRootDescriptors();
+                rootDescriptorBindPoint = bindPoint;
+                rootDescriptorLayout = pipelineLayout;
+                rootDescriptorSetIndex = rootBinding.setIndex;
+                slot = 0;
+            }
+
+            rootDescriptorWriteCount++;
+        }
+
+        VkDescriptorBufferInfo &bufferInfo = rootDescriptorBufferInfos[slot];
+        bufferInfo = {};
         bufferInfo.buffer = interfaceBuffer->vk;
         bufferInfo.offset = bufferReference.offset;
         bufferInfo.range = range;
 
-        VkWriteDescriptorSet write = {};
+        VkWriteDescriptorSet &write = rootDescriptorWrites[slot];
+        write = {};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write.dstBinding = rootBinding.binding;
         write.descriptorCount = 1;
         write.descriptorType = rootBinding.type;
+        // Into the parallel array, which is a member and so outlives this call;
+        // the push happens later, from flushRootDescriptors.
         write.pBufferInfo = &bufferInfo;
+    }
 
-        vkCmdPushDescriptorSetKHR(vk, bindPoint, pipelineLayout->vk, rootBinding.setIndex, 1, &write);
+    void VulkanCommandList::flushRootDescriptors() {
+        if (rootDescriptorWriteCount == 0) {
+            return;
+        }
+
+        vkCmdPushDescriptorSetKHR(vk, rootDescriptorBindPoint, rootDescriptorLayout->vk, rootDescriptorSetIndex, rootDescriptorWriteCount, rootDescriptorWrites);
+        rootDescriptorWriteCount = 0;
     }
 
     void VulkanCommandList::setRaytracingPipelineLayout(const RenderPipelineLayout *pipelineLayout) {
