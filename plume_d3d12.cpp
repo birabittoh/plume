@@ -1398,6 +1398,9 @@ namespace plume {
         UINT syncInterval = (vsyncEnabled && !desc.enablePresentWait) ? 1 : 0;
         UINT flags = (!vsyncEnabled && tearingAllowed) ? DXGI_PRESENT_ALLOW_TEARING : 0;
         HRESULT res = d3d->Present(syncInterval, flags);
+        if (FAILED(res)) {
+            lastError = res;
+        }
         return SUCCEEDED(res);
     }
 
@@ -1417,13 +1420,19 @@ namespace plume {
             return false;
         }
 
+        // Null checked like the destructor's loop: a resize that fails below
+        // leaves every texture released and null, and the caller's usual answer
+        // to a failed resize is to ask for another one.
         for (uint32_t i = 0; i < desc.textureCount; i++) {
-            textures[i].d3d->Release();
-            textures[i].d3d = nullptr;
+            if (textures[i].d3d != nullptr) {
+                textures[i].d3d->Release();
+                textures[i].d3d = nullptr;
+            }
         }
 
         HRESULT res = d3d->ResizeBuffers(0, 0, 0, DXGI_FORMAT_UNKNOWN, swapChainFlags);
         if (FAILED(res)) {
+            lastError = res;
             fprintf(stderr, "ResizeBuffers failed with error code 0x%lX.\n", res);
             return false;
         }
@@ -1493,11 +1502,28 @@ namespace plume {
     }
 
     bool D3D12SwapChain::isEmpty() const {
-        return (d3d == nullptr) || (width == 0) || (height == 0);
+        // The last condition covers a resize whose ResizeBuffers failed: the
+        // back buffers are released by then, so there is nothing to present
+        // into even though the swap chain still reports a size.
+        return (d3d == nullptr) || (width == 0) || (height == 0) || textures.empty() ||
+               (textures[0].d3d == nullptr);
     }
 
     uint32_t D3D12SwapChain::getRefreshRate() const {
         return 0;
+    }
+
+    uint64_t D3D12SwapChain::getLastError() const {
+        return uint64_t(uint32_t(lastError));
+    }
+
+    uint64_t D3D12SwapChain::getDeviceRemovedReason() const {
+        if ((commandQueue == nullptr) || (commandQueue->device == nullptr) ||
+            (commandQueue->device->d3d == nullptr)) {
+            return 0;
+        }
+
+        return uint64_t(uint32_t(commandQueue->device->d3d->GetDeviceRemovedReason()));
     }
 
     // D3D12Framebuffer
