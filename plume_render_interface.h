@@ -103,6 +103,14 @@ namespace plume {
 
         // Only valid if displayTiming is enabled in capabilities.
         virtual uint32_t getRefreshRate() const = 0;
+
+        // The API's own code for whatever present() or resize() last failed
+        // with, and the device's removal reason if it has one. Zero when the
+        // backend does not track it. Diagnostic only: a failed present and a
+        // removed device need very different responses and otherwise look
+        // identical from the caller's side.
+        virtual uint64_t getLastError() const { return 0; }
+        virtual uint64_t getDeviceRemovedReason() const { return 0; }
     };
 
     struct RenderFramebuffer {

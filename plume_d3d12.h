@@ -119,6 +119,7 @@ namespace plume {
         uint32_t refreshRate = 0;
         bool vsyncEnabled = true;
         UINT swapChainFlags = 0;
+        HRESULT lastError = S_OK;
 
         D3D12SwapChain(D3D12CommandQueue *commandQueue, const RenderSwapChainDesc &desc);
         ~D3D12SwapChain() override;
@@ -136,6 +137,8 @@ namespace plume {
         RenderWindow getWindow() const override;
         bool isEmpty() const override;
         uint32_t getRefreshRate() const override;
+        uint64_t getLastError() const override;
+        uint64_t getDeviceRemovedReason() const override;
         void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
         void setTextures();
     };
