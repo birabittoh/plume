@@ -731,6 +731,12 @@ namespace plume {
         return (flags & RenderTextureFlag::DEPTH_TARGET) != 0 ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
     }
 
+    // A buffer copy addresses exactly one aspect, and the depth plane is the one
+    // anything copying a depth image through a buffer is after.
+    static VkImageAspectFlags toBufferCopyAspectFlags(const RenderTextureFlags flags) {
+        return toViewAspectFlags(flags);
+    }
+
     static VkImageAspectFlags toAspectFlags(const RenderFormat format, const RenderTextureFlags flags) {
         VkImageAspectFlags aspect = toViewAspectFlags(flags);
         if ((flags & RenderTextureFlag::DEPTH_TARGET) != 0 && RenderFormatIsStencil(format)) {
@@ -3433,7 +3439,7 @@ namespace plume {
             imageCopy.bufferOffset = srcLocation.placedFootprint.offset;
             imageCopy.bufferRowLength = ((srcLocation.placedFootprint.rowWidth + blockWidth - 1) / blockWidth) * blockWidth;
             imageCopy.bufferImageHeight = ((srcLocation.placedFootprint.height + blockWidth - 1) / blockWidth) * blockWidth;
-            imageCopy.imageSubresource.aspectMask = toAspectFlags(dstTexture->desc.format, dstTexture->desc.flags);
+            imageCopy.imageSubresource.aspectMask = toBufferCopyAspectFlags(dstTexture->desc.flags);
             imageCopy.imageSubresource.baseArrayLayer = dstLocation.subresource.arrayIndex;
             imageCopy.imageSubresource.layerCount = 1;
             imageCopy.imageSubresource.mipLevel = dstLocation.subresource.mipLevel;
@@ -3457,7 +3463,7 @@ namespace plume {
             imageCopy.bufferOffset = dstLocation.placedFootprint.offset;
             imageCopy.bufferRowLength = ((dstLocation.placedFootprint.rowWidth + blockWidth - 1) / blockWidth) * blockWidth;
             imageCopy.bufferImageHeight = ((dstLocation.placedFootprint.height + blockWidth - 1) / blockWidth) * blockWidth;
-            imageCopy.imageSubresource.aspectMask = toAspectFlags(srcTexture->desc.format, srcTexture->desc.flags);
+            imageCopy.imageSubresource.aspectMask = toBufferCopyAspectFlags(srcTexture->desc.flags);
             imageCopy.imageSubresource.baseArrayLayer = srcLocation.subresource.arrayIndex;
             imageCopy.imageSubresource.layerCount = 1;
             imageCopy.imageSubresource.mipLevel = srcLocation.subresource.mipLevel;
