@@ -3579,6 +3579,29 @@ namespace plume {
         vkCmdCopyImage(vk, src->vk, srcLayout, dst->vk, dstLayout, uint32_t(imageCopies.size()), imageCopies.data());
     }
 
+    bool VulkanCommandList::blitTexture(const RenderTexture *dstTexture, const RenderTexture *srcTexture, bool linear) {
+        endActiveRenderPass();
+
+        assert(dstTexture != nullptr);
+        assert(srcTexture != nullptr);
+
+        const VulkanTexture *dst = static_cast<const VulkanTexture *>(dstTexture);
+        const VulkanTexture *src = static_cast<const VulkanTexture *>(srcTexture);
+        VkImageBlit blit = {};
+        blit.srcSubresource.aspectMask = toAspectFlags(src->desc.format, src->desc.flags);
+        blit.srcSubresource.layerCount = 1;
+        blit.srcOffsets[1].x = int32_t(src->desc.width);
+        blit.srcOffsets[1].y = int32_t(src->desc.height);
+        blit.srcOffsets[1].z = int32_t(src->desc.depth);
+        blit.dstSubresource.aspectMask = toAspectFlags(dst->desc.format, dst->desc.flags);
+        blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[1].x = int32_t(dst->desc.width);
+        blit.dstOffsets[1].y = int32_t(dst->desc.height);
+        blit.dstOffsets[1].z = int32_t(dst->desc.depth);
+        vkCmdBlitImage(vk, src->vk, toImageLayout(src->textureLayout), dst->vk, toImageLayout(dst->textureLayout), 1, &blit, linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+        return true;
+    }
+
     void VulkanCommandList::resolveTexture(const RenderTexture *dstTexture, const RenderTexture *srcTexture) {
         resolveTextureRegion(dstTexture, 0, 0, srcTexture, nullptr, RenderResolveMode::AVERAGE);
     }
