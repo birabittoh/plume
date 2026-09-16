@@ -1076,7 +1076,10 @@ namespace plume {
     }
 
     void VulkanTexture::fillSubresourceRange() {
-        imageSubresourceRange.aspectMask = toViewAspectFlags(desc.flags);
+        // The default view is what framebuffers attach, and a depth stencil
+        // attachment has to cover both planes of a combined format; sampling
+        // goes through an explicit view, which stays depth only.
+        imageSubresourceRange.aspectMask = toAspectFlags(desc.format, desc.flags);
         imageSubresourceRange.baseMipLevel = 0;
         imageSubresourceRange.levelCount = desc.mipLevels;
         imageSubresourceRange.baseArrayLayer = 0;
