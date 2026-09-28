@@ -2815,7 +2815,19 @@ namespace plume {
 
     // VulkanQueryPool
 
-    VulkanQueryPool::VulkanQueryPool(VulkanDevice *device, uint32_t queryCount) {
+    VulkanQueryPool::VulkanQueryPool(VulkanDevice *device, uint32_t queryCount, RenderQueryType type) {
+        this->type = type;
+        if (type == RenderQueryType::OCCLUSION) {
+            VkPhysicalDeviceFeatures features = {};
+            vkGetPhysicalDeviceFeatures(device->physicalDevice, &features);
+            precise = features.occlusionQueryPrecise;
+            readbackBuffer = device->createBuffer(RenderBufferDesc::ReadbackBuffer(sizeof(uint64_t) * queryCount));
+            static bool warned = false;
+            if (!precise && !warned) {
+                fprintf(stderr, "Precise occlusion queries unavailable; exposure sample counts may be inaccurate.\n");
+                warned = true;
+            }
+        }
         assert(device != nullptr);
         assert(queryCount > 0);
 
@@ -2823,7 +2835,7 @@ namespace plume {
 
         VkQueryPoolCreateInfo createInfo = {};
         createInfo.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
-        createInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        createInfo.queryType = type == RenderQueryType::OCCLUSION ? VK_QUERY_TYPE_OCCLUSION : VK_QUERY_TYPE_TIMESTAMP;
         createInfo.queryCount = queryCount;
         
         VkResult res = vkCreateQueryPool(device->vk, &createInfo, nullptr, &vk);
@@ -2840,6 +2852,14 @@ namespace plume {
     }
 
     void VulkanQueryPool::queryResults() {
+        if (type == RenderQueryType::OCCLUSION) {
+            void *data = readbackBuffer->map();
+            const auto *buffer = static_cast<const VulkanBuffer *>(readbackBuffer.get());
+            vmaInvalidateAllocation(device->allocator, buffer->allocation, 0, VK_WHOLE_SIZE);
+            memcpy(results.data(), data, results.size() * sizeof(uint64_t));
+            readbackBuffer->unmap();
+            return;
+        }
 	    VkResult res = vkGetQueryPoolResults(device->vk, vk, 0, uint32_t(results.size()), sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
         if (res != VK_SUCCESS) {
             fprintf(stderr, "vkGetQueryPoolResults failed with error code 0x%X.\n", res);
@@ -3746,6 +3766,33 @@ namespace plume {
         vkCmdResetQueryPool(vk, interfaceQueryPool->vk, queryFirstIndex, queryCount);
     }
 
+    void VulkanCommandList::beginQuery(const RenderQueryPool *queryPool, uint32_t queryIndex) {
+        const auto *pool = static_cast<const VulkanQueryPool *>(queryPool);
+        endActiveRenderPass();
+        vkCmdResetQueryPool(vk, pool->vk, queryIndex, 1);
+        vkCmdBeginQuery(vk, pool->vk, queryIndex, pool->precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+    }
+
+    void VulkanCommandList::endQuery(const RenderQueryPool *queryPool, uint32_t queryIndex) {
+        const auto *pool = static_cast<const VulkanQueryPool *>(queryPool);
+        const auto *buffer = static_cast<const VulkanBuffer *>(pool->readbackBuffer.get());
+        endActiveRenderPass();
+        vkCmdEndQuery(vk, pool->vk, queryIndex);
+        vkCmdCopyQueryPoolResults(vk, pool->vk, queryIndex, 1, buffer->vk,
+            queryIndex * sizeof(uint64_t), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+        VkBufferMemoryBarrier barrier = {};
+        barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.buffer = buffer->vk;
+        barrier.offset = queryIndex * sizeof(uint64_t);
+        barrier.size = sizeof(uint64_t);
+        vkCmdPipelineBarrier(vk, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+            0, 0, nullptr, 1, &barrier, 0, nullptr);
+    }
+
     void VulkanCommandList::writeTimestamp(const RenderQueryPool *queryPool, uint32_t queryIndex) {
         assert(queryPool != nullptr);
 
@@ -4517,8 +4564,8 @@ namespace plume {
         return std::make_unique<VulkanFramebuffer>(this, desc);
     }
 
-    std::unique_ptr<RenderQueryPool> VulkanDevice::createQueryPool(uint32_t queryCount) {
-        return std::make_unique<VulkanQueryPool>(this, queryCount);
+    std::unique_ptr<RenderQueryPool> VulkanDevice::createQueryPool(uint32_t queryCount, RenderQueryType type) {
+        return std::make_unique<VulkanQueryPool>(this, queryCount, type);
     }
 
     void VulkanDevice::setBottomLevelASBuildInfo(RenderBottomLevelASBuildInfo &buildInfo, const RenderBottomLevelASMesh *meshes, uint32_t meshCount, bool preferFastBuild, bool preferFastTrace) {
