@@ -1289,6 +1289,11 @@ namespace plume {
         uint32_t stencilReadMask = 0xFFFFFFFF;
         uint32_t stencilWriteMask = 0xFFFFFFFF;
         uint32_t stencilReference = 0;
+        // When enabled by a backend, the stencil reference is supplied through
+        // RenderCommandList::setStencilReference instead of being baked into
+        // the graphics pipeline. Disabled by default to preserve existing
+        // RenderGraphicsPipelineDesc semantics for all current callers.
+        bool dynamicStencilReferenceEnabled = false;
         RenderStencilFaceDesc stencilFrontFace;
         RenderStencilFaceDesc stencilBackFace;
         RenderMultisampling multisampling;
