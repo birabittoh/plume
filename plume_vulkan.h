@@ -462,6 +462,7 @@ namespace plume {
         bool loadStoreOpNoneSupported = false;
         bool nullDescriptorSupported = false;
         bool pushDescriptorSupported = false;
+        VkPipelineCache pipelineCache = VK_NULL_HANDLE;
 
         VulkanDevice(VulkanInterface *renderInterface, const std::string &preferredDeviceName);
         ~VulkanDevice() override;
@@ -491,6 +492,8 @@ namespace plume {
         bool isValid() const;
         bool beginCapture() override;
         bool endCapture() override;
+        bool loadPipelineCache(const void *data, size_t size) override;
+        bool getPipelineCacheData(std::vector<uint8_t> &out) override;
     };
 
     struct VulkanInterface : RenderInterface {

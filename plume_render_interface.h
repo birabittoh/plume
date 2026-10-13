@@ -263,6 +263,11 @@ namespace plume {
         virtual RenderSampleCounts getSampleCountsSupported(RenderFormat format) const = 0;
         virtual bool beginCapture() = 0;
         virtual bool endCapture() = 0;
+
+        // Driver pipeline cache, for backends whose driver does not keep one itself.
+        // Seed it before creating pipelines; data from another driver or device is ignored.
+        virtual bool loadPipelineCache(const void *data, size_t size) { return false; }
+        virtual bool getPipelineCacheData(std::vector<uint8_t> &out) { return false; }
     };
 
     struct RenderInterface {
