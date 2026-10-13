@@ -4883,15 +4883,28 @@ namespace plume {
 
     // VulkanInterface
 
+    // Lets the host supply a driver loaded outside the system loader (e.g. through libadrenotools).
+    static PFN_vkGetInstanceProcAddr customGetInstanceProcAddr = nullptr;
+
+    void SetVulkanGetInstanceProcAddr(void *getInstanceProcAddr) {
+        customGetInstanceProcAddr = reinterpret_cast<PFN_vkGetInstanceProcAddr>(getInstanceProcAddr);
+    }
+
 #if defined(PLUME_SDL2_VULKAN_ENABLED)
     VulkanInterface::VulkanInterface(RenderWindow sdlWindow) {
 #else
     VulkanInterface::VulkanInterface() {
 #endif
-        VkResult res = volkInitialize();
-        if (res != VK_SUCCESS) {
-            fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
-            return;
+        VkResult res = VK_SUCCESS;
+        if (customGetInstanceProcAddr != nullptr) {
+            volkInitializeCustom(customGetInstanceProcAddr);
+        }
+        else {
+            res = volkInitialize();
+            if (res != VK_SUCCESS) {
+                fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
+                return;
+            }
         }
 
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
