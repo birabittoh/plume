@@ -1289,6 +1289,9 @@ namespace plume {
         uint32_t stencilReadMask = 0xFFFFFFFF;
         uint32_t stencilWriteMask = 0xFFFFFFFF;
         uint32_t stencilReference = 0;
+        // Take the reference from RenderCommandList::setStencilReference instead of
+        // stencilReference, so pipelines that differ only by it can be shared.
+        bool dynamicStencilReferenceEnabled = false;
         RenderStencilFaceDesc stencilFrontFace;
         RenderStencilFaceDesc stencilBackFace;
         RenderMultisampling multisampling;
