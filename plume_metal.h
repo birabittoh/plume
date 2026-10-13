@@ -193,6 +193,7 @@ namespace plume {
         MTL::Winding winding = MTL::WindingClockwise;
         MTL::PrimitiveType primitiveType = MTL::PrimitiveTypeTriangle;
         uint32_t stencilReference = 0;
+        bool dynamicStencilReferenceEnabled = false;
         float depthBiasConstantFactor;
         float depthBiasClamp;
         float depthBiasSlopeFactor;
@@ -429,6 +430,8 @@ namespace plume {
             float slopeScaledDepthBias;
         } dynamicDepthBias;
 
+        uint32_t dynamicStencilReference = 0;
+
         struct {
             uint32_t updateDirtyBits = ~0;
             int update[MetalBarrierStage::COUNT] = {};
@@ -482,6 +485,7 @@ namespace plume {
         void setScissors(const RenderRect *scissorRects, uint32_t count) override;
         void setFramebuffer(const RenderFramebuffer *framebuffer) override;
         void setDepthBias(float depthBias, float depthBiasClamp, float slopeScaledDepthBias) override;
+        void setStencilReference(uint32_t stencilReference) override;
         void clearColor(uint32_t attachmentIndex, RenderColor colorValue, const RenderRect *clearRects, uint32_t clearRectsCount) override;
         void clearDepthStencil(bool clearDepth, bool clearStencil, float depthValue, uint32_t stencilValue, const RenderRect *clearRects, uint32_t clearRectsCount) override;
         void copyBufferRegion(RenderBufferReference dstBuffer, RenderBufferReference srcBuffer, uint64_t size) override;
