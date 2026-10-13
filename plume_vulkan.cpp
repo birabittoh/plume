@@ -1507,7 +1507,7 @@ namespace plume {
         pipelineInfo.layout = pipelineLayout->vk;
         pipelineInfo.stage = stageInfo;
 
-        VkResult res = vkCreateComputePipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
+        VkResult res = vkCreateComputePipelines(device->vk, device->pipelineCache, 1, &pipelineInfo, nullptr, &vk);
         if (res != VK_SUCCESS) {
             fprintf(stderr, "vkCreateComputePipelines failed with error code 0x%X.\n", res);
             return;
@@ -1766,7 +1766,7 @@ namespace plume {
         pipelineInfo.layout = pipelineLayout->vk;
         pipelineInfo.renderPass = renderPass;
 
-        VkResult res = vkCreateGraphicsPipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
+        VkResult res = vkCreateGraphicsPipelines(device->vk, device->pipelineCache, 1, &pipelineInfo, nullptr, &vk);
         if (res != VK_SUCCESS) {
             fprintf(stderr, "vkCreateGraphicsPipelines failed with error code 0x%X.\n", res);
             return;
@@ -4490,6 +4490,8 @@ namespace plume {
         if (!nullDescriptorSupported) {
             nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
         }
+
+        loadPipelineCache(nullptr, 0);
     }
 
     VulkanDevice::~VulkanDevice() {
@@ -4776,6 +4778,11 @@ namespace plume {
     void VulkanDevice::release() {
         nullBuffer = nullptr; // force destruction before destroying allocator
 
+        if (pipelineCache != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(vk, pipelineCache, nullptr);
+            pipelineCache = VK_NULL_HANDLE;
+        }
+
         if (allocator != VK_NULL_HANDLE) {
             vmaDestroyAllocator(allocator);
             allocator = VK_NULL_HANDLE;
@@ -4785,6 +4792,66 @@ namespace plume {
             vkDestroyDevice(vk, nullptr);
             vk = VK_NULL_HANDLE;
         }
+    }
+
+    bool VulkanDevice::loadPipelineCache(const void *data, size_t size) {
+        // Drivers are meant to reject foreign data themselves, but some crash on it instead.
+        bool accepted = false;
+        if ((data != nullptr) && (size >= sizeof(VkPipelineCacheHeaderVersionOne))) {
+            VkPipelineCacheHeaderVersionOne header;
+            memcpy(&header, data, sizeof(header));
+            accepted = (header.headerSize >= sizeof(header)) &&
+                (header.headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE) &&
+                (header.vendorID == physicalDeviceProperties.vendorID) &&
+                (header.deviceID == physicalDeviceProperties.deviceID) &&
+                (memcmp(header.pipelineCacheUUID, physicalDeviceProperties.pipelineCacheUUID, VK_UUID_SIZE) == 0);
+        }
+
+        VkPipelineCacheCreateInfo createInfo = {};
+        createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+        createInfo.initialDataSize = accepted ? size : 0;
+        createInfo.pInitialData = accepted ? data : nullptr;
+
+        VkPipelineCache created = VK_NULL_HANDLE;
+        VkResult res = vkCreatePipelineCache(vk, &createInfo, nullptr, &created);
+        if ((res != VK_SUCCESS) && accepted) {
+            createInfo.initialDataSize = 0;
+            createInfo.pInitialData = nullptr;
+            accepted = false;
+            res = vkCreatePipelineCache(vk, &createInfo, nullptr, &created);
+        }
+
+        if (res != VK_SUCCESS) {
+            fprintf(stderr, "vkCreatePipelineCache failed with error code 0x%X.\n", res);
+            return false;
+        }
+
+        if (pipelineCache != VK_NULL_HANDLE) {
+            vkDestroyPipelineCache(vk, pipelineCache, nullptr);
+        }
+
+        pipelineCache = created;
+        return accepted;
+    }
+
+    bool VulkanDevice::getPipelineCacheData(std::vector<uint8_t> &out) {
+        if (pipelineCache == VK_NULL_HANDLE) {
+            return false;
+        }
+
+        size_t size = 0;
+        if (vkGetPipelineCacheData(vk, pipelineCache, &size, nullptr) != VK_SUCCESS) {
+            return false;
+        }
+
+        out.resize(size);
+        if (vkGetPipelineCacheData(vk, pipelineCache, &size, out.data()) != VK_SUCCESS) {
+            out.clear();
+            return false;
+        }
+
+        out.resize(size);
+        return true;
     }
 
     bool VulkanDevice::isValid() const {
