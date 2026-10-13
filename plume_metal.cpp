@@ -2199,7 +2199,8 @@ namespace plume {
 
     // MetalQueryPool
 
-    MetalQueryPool::MetalQueryPool(MetalDevice *device, uint32_t queryCount) {
+    MetalQueryPool::MetalQueryPool(MetalDevice *device, uint32_t queryCount, RenderQueryType type) {
+        this->type = type;
         assert(device != nullptr);
         assert(queryCount > 0);
 
@@ -3204,6 +3205,14 @@ namespace plume {
         // No-op
     }
 
+    void MetalCommandList::beginQuery(const RenderQueryPool *, uint32_t) {
+        assert(false);
+    }
+
+    void MetalCommandList::endQuery(const RenderQueryPool *, uint32_t) {
+        assert(false);
+    }
+
     void MetalCommandList::writeTimestamp(const RenderQueryPool *queryPool, uint32_t queryIndex) {
         assert(queryPool != nullptr);
 
@@ -3948,8 +3957,11 @@ namespace plume {
         return std::make_unique<MetalFramebuffer>(this, desc);
     }
 
-    std::unique_ptr<RenderQueryPool> MetalDevice::createQueryPool(uint32_t queryCount) {
-        return std::make_unique<MetalQueryPool>(this, queryCount);
+    std::unique_ptr<RenderQueryPool> MetalDevice::createQueryPool(uint32_t queryCount, RenderQueryType type) {
+        if (type == RenderQueryType::OCCLUSION) {
+            return nullptr;
+        }
+        return std::make_unique<MetalQueryPool>(this, queryCount, type);
     }
 
     void MetalDevice::setBottomLevelASBuildInfo(RenderBottomLevelASBuildInfo &buildInfo, const RenderBottomLevelASMesh *meshes, uint32_t meshCount, bool preferFastBuild, bool preferFastTrace) {

@@ -12,6 +12,7 @@
 #include "plume_render_interface_types.h"
 
 namespace plume {
+    enum class RenderQueryType { TIMESTAMP, OCCLUSION };
     // Interfaces.
 
     struct RenderBufferFormattedView {
@@ -165,6 +166,8 @@ namespace plume {
         virtual void discardTexture(const RenderTexture* texture) = 0; // D3D12 only.
         virtual void resetQueryPool(const RenderQueryPool *queryPool, uint32_t queryFirstIndex, uint32_t queryCount) = 0;
         virtual void writeTimestamp(const RenderQueryPool *queryPool, uint32_t queryIndex) = 0;
+        virtual void beginQuery(const RenderQueryPool *queryPool, uint32_t queryIndex) = 0;
+        virtual void endQuery(const RenderQueryPool *queryPool, uint32_t queryIndex) = 0;
 
         // Concrete implementation shortcuts.
         inline void barriers(RenderBarrierStages stages, const RenderBufferBarrier &barrier) {
@@ -255,7 +258,7 @@ namespace plume {
         virtual std::unique_ptr<RenderCommandFence> createCommandFence() = 0;
         virtual std::unique_ptr<RenderCommandSemaphore> createCommandSemaphore() = 0;
         virtual std::unique_ptr<RenderFramebuffer> createFramebuffer(const RenderFramebufferDesc &desc) = 0;
-        virtual std::unique_ptr<RenderQueryPool> createQueryPool(uint32_t queryCount) = 0;
+        virtual std::unique_ptr<RenderQueryPool> createQueryPool(uint32_t queryCount, RenderQueryType type = RenderQueryType::TIMESTAMP) = 0;
         virtual void setBottomLevelASBuildInfo(RenderBottomLevelASBuildInfo &buildInfo, const RenderBottomLevelASMesh *meshes, uint32_t meshCount, bool preferFastBuild = true, bool preferFastTrace = false) = 0;
         virtual void setTopLevelASBuildInfo(RenderTopLevelASBuildInfo &buildInfo, const RenderTopLevelASInstance *instances, uint32_t instanceCount, bool preferFastBuild = true, bool preferFastTrace = false) = 0;
         virtual void setShaderBindingTableInfo(RenderShaderBindingTableInfo &tableInfo, const RenderShaderBindingGroups &groups, const RenderPipeline *pipeline, RenderDescriptorSet **descriptorSets, uint32_t descriptorSetCount) = 0;
@@ -264,6 +267,11 @@ namespace plume {
         virtual RenderSampleCounts getSampleCountsSupported(RenderFormat format) const = 0;
         virtual bool beginCapture() = 0;
         virtual bool endCapture() = 0;
+
+        // Driver pipeline cache, for backends whose driver does not keep one itself.
+        // Seed it before creating pipelines; data from another driver or device is ignored.
+        virtual bool loadPipelineCache(const void *data, size_t size) { return false; }
+        virtual bool getPipelineCacheData(std::vector<uint8_t> &out) { return false; }
     };
 
     struct RenderInterface {
