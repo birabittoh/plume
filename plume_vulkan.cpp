@@ -1729,7 +1729,7 @@ namespace plume {
         dynamicStates.clear();
         dynamicStates.emplace_back(VK_DYNAMIC_STATE_VIEWPORT);
         dynamicStates.emplace_back(VK_DYNAMIC_STATE_SCISSOR);
-        if (desc.dynamicStencilReferenceEnabled) {
+        if (desc.stencilEnabled && desc.dynamicStencilReferenceEnabled) {
             dynamicStates.emplace_back(VK_DYNAMIC_STATE_STENCIL_REFERENCE);
         }
 

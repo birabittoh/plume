@@ -1613,6 +1613,7 @@ namespace plume {
         state.renderPipelineState = device->mtl->newRenderPipelineState(descriptor, &error);
         state.primitiveType = mapPrimitiveType(desc.primitiveTopology);
         state.stencilReference = desc.stencilEnabled ? desc.stencilReference : 0;
+        state.dynamicStencilReferenceEnabled = desc.stencilEnabled && desc.dynamicStencilReferenceEnabled;
 
         if (desc.dynamicDepthBiasEnabled) {
             state.dynamicDepthBiasEnabled = true;
@@ -2764,6 +2765,11 @@ namespace plume {
         dirtyGraphicsState.depthBias = 1;
     }
 
+    void MetalCommandList::setStencilReference(uint32_t stencilReference) {
+        dynamicStencilReference = stencilReference;
+        dirtyGraphicsState.depthStencil = 1;
+    }
+
     void MetalCommandList::setCommonClearState() const {
         activeRenderEncoder->setViewport({ 0, 0, static_cast<float>(targetFramebuffer->width), static_cast<float>(targetFramebuffer->height), 0.0f, 1.0f });
         activeRenderEncoder->setScissorRect(clampScissorRectIfNecessary({ 0, 0, static_cast<int32_t>(targetFramebuffer->width), static_cast<int32_t>(targetFramebuffer->height) }, targetFramebuffer));
@@ -3424,9 +3430,10 @@ namespace plume {
                     activeRenderEncoder->setDepthStencilState(activeRenderState->depthStencilState);
                     stateCache.lastDepthStencilState = activeRenderState->depthStencilState;
                 }
-                if (activeRenderState->stencilReference != stateCache.lastStencilReference) {
-                    activeRenderEncoder->setStencilReferenceValue(activeRenderState->stencilReference);
-                    stateCache.lastStencilReference = activeRenderState->stencilReference;
+                const uint32_t stencilReference = activeRenderState->dynamicStencilReferenceEnabled ? dynamicStencilReference : activeRenderState->stencilReference;
+                if (stencilReference != stateCache.lastStencilReference) {
+                    activeRenderEncoder->setStencilReferenceValue(stencilReference);
+                    stateCache.lastStencilReference = stencilReference;
                 }
             }
             dirtyGraphicsState.depthStencil = 0;

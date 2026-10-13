@@ -1949,6 +1949,7 @@ namespace plume {
         activeGraphicsPipeline = nullptr;
         activeTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
         activeStencilRef = 0;
+        dynamicStencilRef = 0;
         descriptorHeapsSet = false;
     }
     
@@ -2298,6 +2299,12 @@ namespace plume {
 #   endif
     }
 
+    void D3D12CommandList::setStencilReference(uint32_t stencilReference) {
+        // Applied at draw time by checkStencilRef, which is where the pipeline's own
+        // reference would otherwise overwrite it.
+        dynamicStencilRef = stencilReference;
+    }
+
     void D3D12CommandList::clearColor(uint32_t attachmentIndex, RenderColor colorValue, const RenderRect *clearRects, uint32_t clearRectsCount) {
         assert(targetFramebuffer != nullptr);
         assert(attachmentIndex < targetFramebuffer->colorTargets.size());
@@ -2536,9 +2543,10 @@ namespace plume {
         assert(activeGraphicsPipeline->type == D3D12Pipeline::Type::Graphics);
 
         const D3D12GraphicsPipeline *graphicsPipeline = static_cast<const D3D12GraphicsPipeline *>(activeGraphicsPipeline);
-        if (activeStencilRef != graphicsPipeline->stencilRef) {
-            d3d->OMSetStencilRef(graphicsPipeline->stencilRef);
-            activeStencilRef = graphicsPipeline->stencilRef;
+        const uint32_t stencilRef = graphicsPipeline->dynamicStencilRef ? dynamicStencilRef : graphicsPipeline->stencilRef;
+        if (activeStencilRef != stencilRef) {
+            d3d->OMSetStencilRef(stencilRef);
+            activeStencilRef = stencilRef;
         }
     }
     
@@ -3151,6 +3159,7 @@ namespace plume {
 
         topology = toD3D12(desc.primitiveTopology);
         stencilRef = desc.stencilEnabled ? desc.stencilReference : 0;
+        dynamicStencilRef = desc.stencilEnabled && desc.dynamicStencilReferenceEnabled;
 
         const D3D12PipelineLayout *pipelineLayout = static_cast<const D3D12PipelineLayout *>(desc.pipelineLayout);
         const D3D12Shader *vertexShader = static_cast<const D3D12Shader *>(desc.vertexShader);

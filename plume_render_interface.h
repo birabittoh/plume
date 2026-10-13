@@ -146,10 +146,10 @@ namespace plume {
         virtual void setScissors(const RenderRect *scissorRects, uint32_t count) = 0;
         virtual void setFramebuffer(const RenderFramebuffer *framebuffer) = 0;
         virtual void setDepthBias(float depthBias, float depthBiasClamp, float slopeScaledDepthBias) = 0;
-        // Optional dynamic stencil-reference state. Backends that support it
-        // override this method; callers enable the matching pipeline state with
-        // RenderGraphicsPipelineDesc::dynamicStencilReferenceEnabled.
-        virtual void setStencilReference(uint32_t stencilReference) { }
+        // Only read by pipelines created with dynamicStencilReferenceEnabled. Set it
+        // again after binding such a pipeline: Vulkan drops the value whenever a
+        // pipeline with a static reference is bound in between.
+        virtual void setStencilReference(uint32_t stencilReference) = 0;
         virtual void clearColor(uint32_t attachmentIndex = 0, RenderColor colorValue = RenderColor(), const RenderRect *clearRects = nullptr, uint32_t clearRectsCount = 0) = 0;
         virtual void clearDepthStencil(bool clearDepth = true, bool clearStencil = true, float depthValue = 1.0f, uint32_t stencilValue = 0, const RenderRect *clearRects = nullptr, uint32_t clearRectsCount = 0) = 0;
         virtual void copyBufferRegion(RenderBufferReference dstBuffer, RenderBufferReference srcBuffer, uint64_t size) = 0;
