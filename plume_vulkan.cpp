@@ -48,7 +48,7 @@ namespace plume {
 #   ifdef VULKAN_OBJECT_NAMES_ENABLED
         VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
 #   endif
-#   if defined(_WIN64)
+#   if defined(_WIN32)
         VK_KHR_WIN32_SURFACE_EXTENSION_NAME,
 #   elif defined(__ANDROID__)
         VK_KHR_ANDROID_SURFACE_EXTENSION_NAME,
@@ -1975,7 +1975,7 @@ namespace plume {
 
         this->descriptorSetCount = uint32_t(pipelineLayout->descriptorSetLayouts.size());
 
-        VkResult res = vkCreateRayTracingPipelinesKHR(device->vk, nullptr, nullptr, 1, &pipelineInfo, nullptr, &vk);
+        VkResult res = vkCreateRayTracingPipelinesKHR(device->vk, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
         if (res != VK_SUCCESS) {
             fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
             return;
@@ -2202,7 +2202,7 @@ namespace plume {
 
         VkResult res;
 
-#   ifdef _WIN64
+#   if defined(_WIN32)
         assert(desc.renderWindow != 0);
         VkWin32SurfaceCreateInfoKHR surfaceCreateInfo = {};
         surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
@@ -2215,10 +2215,16 @@ namespace plume {
             fprintf(stderr, "vkCreateWin32SurfaceKHR failed with error code 0x%X.\n", res);
             return;
         }
-#   elif defined(PLUME_SDL_VULKAN_ENABLED)
+#   elif defined(PLUME_SDL2_VULKAN_ENABLED)
         VulkanInterface *renderInterface = commandQueue->device->renderInterface;
-        bool sdlRes = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, nullptr, &surface);
-        if (!sdlRes) {
+        SDL_bool sdlRes = SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, &surface);
+        if (sdlRes == SDL_FALSE) {
+            fprintf(stderr, "SDL_Vulkan_CreateSurface failed with error %s.\n", SDL_GetError());
+            return;
+        }
+#   elif defined(PLUME_SDL3_VULKAN_ENABLED)
+        VulkanInterface *renderInterface = commandQueue->device->renderInterface;
+        if (!SDL_Vulkan_CreateSurface(desc.renderWindow, renderInterface->instance, nullptr, &surface)) {
             fprintf(stderr, "SDL_Vulkan_CreateSurface failed with error %s.\n", SDL_GetError());
             return;
         }
@@ -2597,7 +2603,7 @@ namespace plume {
     }
 
     void VulkanSwapChain::getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const {
-#   if defined(_WIN64)
+#   if defined(_WIN32)
         RECT rect;
         GetClientRect(desc.renderWindow, &rect);
         dstWidth = rect.right - rect.left;
@@ -4877,7 +4883,7 @@ namespace plume {
 
     // VulkanInterface
 
-#if PLUME_SDL_VULKAN_ENABLED
+#if defined(PLUME_SDL2_VULKAN_ENABLED)
     VulkanInterface::VulkanInterface(RenderWindow sdlWindow) {
 #else
     VulkanInterface::VulkanInterface() {
@@ -4918,17 +4924,30 @@ namespace plume {
         const std::unordered_set<std::string> dlssExtensions = DLSS::getRequiredInstanceExtensionsVulkan();
 #   endif
 
-#   if PLUME_SDL_VULKAN_ENABLED
-        // Push the extensions SDL says the current video driver (X11, Wayland,
-        // ...) needs. Unlike SDL2, SDL3 doesn't need a window to ask this --
-        // it just reflects whichever backend SDL_Init already picked.
-        {
-            Uint32 sdlVulkanExtensionCount = 0;
-            char const *const *sdlVulkanExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlVulkanExtensionCount);
-            if (sdlVulkanExtensions != nullptr) {
-                for (Uint32 i = 0; i < sdlVulkanExtensionCount; i++) {
-                    requiredExtensions.insert(sdlVulkanExtensions[i]);
+#   if PLUME_SDL2_VULKAN_ENABLED
+        // Push the extensions specified by SDL as required.
+        // SDL2 has this awkward requirement for the window to pull the extensions from. 
+        if (sdlWindow != nullptr) {
+            uint32_t sdlVulkanExtensionCount = 0;
+            if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &sdlVulkanExtensionCount, nullptr)) {
+                std::vector<char *> sdlVulkanExtensions;
+                sdlVulkanExtensions.resize(sdlVulkanExtensionCount);
+                if (SDL_Vulkan_GetInstanceExtensions(sdlWindow, &sdlVulkanExtensionCount, (const char **)(sdlVulkanExtensions.data()))) {
+                    for (char *sdlVulkanExtension : sdlVulkanExtensions) {
+                        requiredExtensions.insert(sdlVulkanExtension);
+                    }
                 }
+            }
+        }
+#   elif PLUME_SDL3_VULKAN_ENABLED
+        // Push the extensions specified by SDL as required.
+        // SDL3 no longer needs a window, the app must have created a window
+        // with SDL_WINDOW_VULKAN, or called SDL_Vulkan_LoadLibrary before this.
+        uint32_t sdlVulkanExtensionCount = 0;
+        const char * const *sdlVulkanExtensions = SDL_Vulkan_GetInstanceExtensions(&sdlVulkanExtensionCount);
+        if (sdlVulkanExtensions != nullptr) {
+            for (uint32_t i = 0; i < sdlVulkanExtensionCount; i++) {
+                requiredExtensions.insert(sdlVulkanExtensions[i]);
             }
         }
 #   endif
@@ -5042,7 +5061,7 @@ namespace plume {
 
     // Global creation function.
 
-#if PLUME_SDL_VULKAN_ENABLED
+#if defined(PLUME_SDL2_VULKAN_ENABLED)
     std::unique_ptr<RenderInterface> CreateVulkanInterface(RenderWindow sdlWindow) {
         std::unique_ptr<VulkanInterface> createdInterface = std::make_unique<VulkanInterface>(sdlWindow);
         return createdInterface->isValid() ? std::move(createdInterface) : nullptr;

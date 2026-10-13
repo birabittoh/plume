@@ -15,7 +15,11 @@
 #include <cfloat>
 #include <cstdint>
 
-#if defined(_WIN64)
+#if defined(PLUME_SDL2_VULKAN_ENABLED) || defined(PLUME_SDL3_VULKAN_ENABLED)
+#define PLUME_SDL_VULKAN_ENABLED
+#endif
+
+#if defined(_WIN32)
 #include <Windows.h>
 #elif defined(__ANDROID__)
 #include "android/native_window.h"
@@ -29,12 +33,14 @@
 #undef Always
 #endif
 
-#ifdef PLUME_SDL_VULKAN_ENABLED
+#if defined(PLUME_SDL2_VULKAN_ENABLED)
+#include <SDL_vulkan.h>
+#elif defined(PLUME_SDL3_VULKAN_ENABLED)
 #include <SDL3/SDL_vulkan.h>
 #endif
 
 namespace plume {
-#if defined(_WIN64)
+#if defined(_WIN32)
     // Native HWND handle to the target window.
     typedef HWND RenderWindow;
 #elif defined(__ANDROID__)

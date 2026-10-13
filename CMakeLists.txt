@@ -22,9 +22,8 @@ endif()
 
 # Project options
 include(CMakeDependentOption)
-# Android has native VK_KHR_android_surface support in plume_vulkan.cpp;
-# SDL Vulkan integration is only needed on desktop Linux (XCB/Wayland).
-cmake_dependent_option(PLUME_SDL_VULKAN_ENABLED "Enable SDL Vulkan integration" OFF IS_LINUX OFF)
+cmake_dependent_option(PLUME_SDL2_VULKAN_ENABLED "Enable SDL2 Vulkan integration" OFF IS_LINUX OFF)
+cmake_dependent_option(PLUME_SDL3_VULKAN_ENABLED "Enable SDL3 Vulkan integration" OFF IS_LINUX OFF)
 cmake_dependent_option(PLUME_D3D12_AGILITY_SDK_ENABLED "Enable D3D12 Agility SDK" OFF WIN32 OFF)
 cmake_dependent_option(PLUME_APPLE_RETINA_ENABLED "Enable Apple Retina display support" ON APPLE ON)
 option(PLUME_BUILD_EXAMPLES "Build example applications" OFF)
@@ -34,31 +33,23 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
-# Enable SDL Vulkan support. Uses SDL3 (not SDL2) so it shares the same
-# SDL_Window objects as the host application's own SDL3-based windowing --
-# mixing an SDL3 SDL_Window* into SDL2's Vulkan calls is an ABI mismatch that
-# manifests as an unexplained hang or crash inside SDL, not a clean error.
-#
-# Deliberately header-only, no target_link_libraries: the host application
-# already links the one real SDL3 shared library (via the ReXGlue SDK), and
-# these symbols resolve against it at the final executable link. Linking the
-# static SDL3 target here too would bake a second, separately-initialized
-# copy of SDL3 into the binary -- its own Vulkan function table never gets
-# populated (SDL_Init runs against the SDK's copy, not this one), and calling
-# through it null-derefs on the first Vulkan call.
-if(PLUME_SDL_VULKAN_ENABLED)
-    # SDL3::SDL3-static (imported via the ReXGlue SDK's find_dependency(SDL3))
-    # doesn't carry its own INTERFACE_INCLUDE_DIRECTORIES here; rex::runtime's
-    # does, and already covers the SDK's full include/ tree (SDL3/ included).
-    if(TARGET rex::runtime)
-        get_target_property(PLUME_SDL3_INCLUDE_DIRS rex::runtime INTERFACE_INCLUDE_DIRECTORIES)
-    endif()
-    if(NOT PLUME_SDL3_INCLUDE_DIRS)
-        find_package(SDL3 REQUIRED CONFIG)
-        get_target_property(PLUME_SDL3_INCLUDE_DIRS SDL3::SDL3 INTERFACE_INCLUDE_DIRECTORIES)
+if(PLUME_SDL2_VULKAN_ENABLED AND PLUME_SDL3_VULKAN_ENABLED)
+    message(FATAL_ERROR "Plume - PLUME_SDL2_VULKAN_ENABLED and PLUME_SDL3_VULKAN_ENABLED are mutually exclusive")
+endif()
+
+# Enable SDL Vulkan support
+if(PLUME_SDL2_VULKAN_ENABLED)
+    if (NOT TARGET SDL2::SDL2)
+        find_package(SDL2 REQUIRED)
+    else()
+        set(SDL2_INCLUDE_DIRS "$<TARGET_PROPERTY:SDL2::SDL2,INTERFACE_INCLUDE_DIRECTORIES>")
     endif()
 
-    message(STATUS "Plume - Building with SDL3_INCLUDE_DIRS: ${PLUME_SDL3_INCLUDE_DIRS}")
+    message(STATUS "Plume - Building with SDL2_INCLUDE_DIRS: ${SDL2_INCLUDE_DIRS}")
+elseif(PLUME_SDL3_VULKAN_ENABLED)
+    if (NOT TARGET SDL3::Headers)
+        find_package(SDL3 REQUIRED)
+    endif()
 endif()
 
 # Enable D3D12 Agility SDK support
@@ -69,7 +60,8 @@ endif()
 
 # Print status messages
 message(STATUS "Plume - Building with backends: Vulkan=1 Metal=${APPLE} D3D12=${WIN32}")
-message(STATUS "Plume - SDL Vulkan integration: ${PLUME_SDL_VULKAN_ENABLED}")
+message(STATUS "Plume - SDL2 Vulkan integration: ${PLUME_SDL2_VULKAN_ENABLED}")
+message(STATUS "Plume - SDL3 Vulkan integration: ${PLUME_SDL3_VULKAN_ENABLED}")
 message(STATUS "Plume - D3D12 Agility SDK: ${PLUME_D3D12_AGILITY_SDK_ENABLED}")
 message(STATUS "Plume - Building examples: ${PLUME_BUILD_EXAMPLES}")
 
@@ -112,9 +104,12 @@ if(WIN32)
     )
 endif()
 
-if(PLUME_SDL_VULKAN_ENABLED)
-    target_compile_definitions(plume PUBLIC PLUME_SDL_VULKAN_ENABLED)
-    target_include_directories(plume PUBLIC ${PLUME_SDL3_INCLUDE_DIRS})
+if(PLUME_SDL2_VULKAN_ENABLED)
+    target_compile_definitions(plume PUBLIC PLUME_SDL2_VULKAN_ENABLED)
+    target_include_directories(plume PUBLIC ${SDL2_INCLUDE_DIRS})
+elseif(PLUME_SDL3_VULKAN_ENABLED)
+    target_compile_definitions(plume PUBLIC PLUME_SDL3_VULKAN_ENABLED)
+    target_link_libraries(plume PUBLIC PUBLIC SDL3::Headers)
 endif()
 
 if(PLUME_D3D12_AGILITY_SDK_ENABLED)
