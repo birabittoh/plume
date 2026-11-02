@@ -129,7 +129,8 @@ namespace plume {
     };
 
     // Where a root descriptor lands in Vulkan: a binding in a push descriptor
-    // set, whose set index is the root descriptor's register space.
+    // set (or, where those can't be trusted, an ordinary one allocated per
+    // draw), whose set index is the root descriptor's register space.
     struct VulkanRootDescriptorBinding {
         uint32_t setIndex = 0;
         uint32_t binding = 0;
@@ -147,6 +148,10 @@ namespace plume {
         // backing the root descriptors, plus empty filler layouts for any set
         // index left unclaimed between them and the regular sets.
         std::vector<VkDescriptorSetLayout> ownedSetLayouts;
+        // The layout of the root descriptor set at each set index, null where
+        // the index holds none: what a set is allocated with when root
+        // descriptors are not pushed.
+        std::vector<VkDescriptorSetLayout> rootSetLayouts;
         VulkanDevice *device = nullptr;
 
         VulkanPipelineLayout(VulkanDevice *device, const RenderPipelineLayoutDesc &desc);
@@ -342,6 +347,20 @@ namespace plume {
         const VulkanPipelineLayout *rootDescriptorLayout = nullptr;
         uint32_t rootDescriptorSetIndex = 0;
 
+        // Root descriptors as ordinary sets (VulkanDevice::rootDescriptorsAsSets):
+        // every flush allocates a new set from these pools, reset when the list
+        // is begun again, and writes into it every binding the set has been
+        // given so far, since a new set (unlike a push) keeps nothing from the
+        // last one.
+        std::vector<VkDescriptorPool> rootSetPools;
+        uint32_t rootSetPoolIndex = 0;
+        VkDescriptorBufferInfo rootSetBufferInfos[MaxRootDescriptorWrites] = {};
+        VkWriteDescriptorSet rootSetWrites[MaxRootDescriptorWrites] = {};
+        uint32_t rootSetWriteCount = 0;
+        VkPipelineBindPoint rootSetBindPoint = VK_PIPELINE_BIND_POINT_MAX_ENUM;
+        const VulkanPipelineLayout *rootSetLayout = nullptr;
+        uint32_t rootSetIndex = 0;
+
         VulkanCommandList(VulkanCommandQueue *queue);
         ~VulkanCommandList() override;
         void begin() override;
@@ -390,6 +409,8 @@ namespace plume {
         void setDescriptorSet(VkPipelineBindPoint bindPoint, const VulkanPipelineLayout *pipelineLayout, const RenderDescriptorSet *descriptorSet, uint32_t setIndex);
         void setRootDescriptor(VkPipelineBindPoint bindPoint, const VulkanPipelineLayout *pipelineLayout, RenderBufferReference bufferReference, uint32_t rootDescriptorIndex);
         void flushRootDescriptors();
+        void bindRootDescriptorSet();
+        VkDescriptorSet allocateRootDescriptorSet(VkDescriptorSetLayout setLayout);
     };
 
     struct VulkanCommandFence : RenderCommandFence {
@@ -463,6 +484,11 @@ namespace plume {
         bool loadStoreOpNoneSupported = false;
         bool nullDescriptorSupported = false;
         bool pushDescriptorSupported = false;
+        // Root descriptors go into ordinary descriptor sets instead of push
+        // descriptor sets: without VK_KHR_push_descriptor, and on Qualcomm's
+        // driver, where a push can rewrite what an earlier draw, in an earlier
+        // render pass, reads (seen on Adreno 810, driver 512.800).
+        bool rootDescriptorsAsSets = false;
         VkPipelineCache pipelineCache = VK_NULL_HANDLE;
 
         VulkanDevice(VulkanInterface *renderInterface, const std::string &preferredDeviceName);

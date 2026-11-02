@@ -1283,7 +1283,7 @@ namespace plume {
         // it compiles the same HLSL to SPIR-V, and it is the mapping the rest
         // of this backend already assumes for descriptor sets.
         if (desc.rootDescriptorDescsCount > 0) {
-            assert(device->pushDescriptorSupported && "Root descriptors need VK_KHR_push_descriptor.");
+            assert((device->pushDescriptorSupported || device->rootDescriptorsAsSets) && "Root descriptors need VK_KHR_push_descriptor.");
 
             // Bindings per register space, in the order the spaces first appear.
             std::vector<uint32_t> rootSetIndices;
@@ -1332,11 +1332,12 @@ namespace plume {
             }
 
             setLayoutHandles.resize(setCount, VK_NULL_HANDLE);
+            rootSetLayouts.resize(setCount, VK_NULL_HANDLE);
 
             for (uint32_t group = 0; group < rootSetIndices.size(); group++) {
                 VkDescriptorSetLayoutCreateInfo setLayoutInfo = {};
                 setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-                setLayoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+                setLayoutInfo.flags = device->rootDescriptorsAsSets ? 0 : VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
                 setLayoutInfo.pBindings = rootSetBindings[group].data();
                 setLayoutInfo.bindingCount = uint32_t(rootSetBindings[group].size());
 
@@ -1349,6 +1350,7 @@ namespace plume {
 
                 ownedSetLayouts.emplace_back(setLayout);
                 setLayoutHandles[rootSetIndices[group]] = setLayout;
+                rootSetLayouts[rootSetIndices[group]] = setLayout;
             }
 
             // Fill the gaps left by resize() above, and any set index the caller
@@ -2948,6 +2950,10 @@ namespace plume {
     }
 
     VulkanCommandList::~VulkanCommandList() {
+        for (VkDescriptorPool pool : rootSetPools) {
+            vkDestroyDescriptorPool(queue->device->vk, pool, nullptr);
+        }
+
         if (vk != VK_NULL_HANDLE) {
             vkFreeCommandBuffers(queue->device->vk, commandPool, 1, &vk);
         }
@@ -2963,6 +2969,16 @@ namespace plume {
         // Anything still pending belongs to the list that was reset, and there
         // is no draw left that could read it.
         rootDescriptorWriteCount = 0;
+
+        // Resetting the list means its last recording has finished on the GPU,
+        // so the sets it allocated are free to go.
+        for (uint32_t i = 0; (i <= rootSetPoolIndex) && (i < rootSetPools.size()); i++) {
+            vkResetDescriptorPool(queue->device->vk, rootSetPools[i], 0);
+        }
+
+        rootSetPoolIndex = 0;
+        rootSetWriteCount = 0;
+        rootSetLayout = nullptr;
 
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -3255,8 +3271,109 @@ namespace plume {
             return;
         }
 
-        vkCmdPushDescriptorSetKHR(vk, rootDescriptorBindPoint, rootDescriptorLayout->vk, rootDescriptorSetIndex, rootDescriptorWriteCount, rootDescriptorWrites);
+        if (queue->device->rootDescriptorsAsSets) {
+            bindRootDescriptorSet();
+        }
+        else {
+            vkCmdPushDescriptorSetKHR(vk, rootDescriptorBindPoint, rootDescriptorLayout->vk, rootDescriptorSetIndex, rootDescriptorWriteCount, rootDescriptorWrites);
+        }
+
         rootDescriptorWriteCount = 0;
+    }
+
+    void VulkanCommandList::bindRootDescriptorSet() {
+        // A push leaves the bindings it doesn't name as they were, so the
+        // pending writes are merged into what this set already had, and the new
+        // set gets all of it. Another set (or layout, or bind point) starts over,
+        // as a push set disturbed by it would.
+        if ((rootSetBindPoint != rootDescriptorBindPoint) || (rootSetLayout != rootDescriptorLayout) || (rootSetIndex != rootDescriptorSetIndex)) {
+            rootSetBindPoint = rootDescriptorBindPoint;
+            rootSetLayout = rootDescriptorLayout;
+            rootSetIndex = rootDescriptorSetIndex;
+            rootSetWriteCount = 0;
+        }
+
+        for (uint32_t i = 0; i < rootDescriptorWriteCount; i++) {
+            uint32_t slot = 0;
+            while ((slot < rootSetWriteCount) && (rootSetWrites[slot].dstBinding != rootDescriptorWrites[i].dstBinding)) {
+                slot++;
+            }
+
+            if (slot == rootSetWriteCount) {
+                if (rootSetWriteCount == MaxRootDescriptorWrites) {
+                    assert(false && "Too many root descriptors in one set.");
+                    continue;
+                }
+
+                rootSetWriteCount++;
+            }
+
+            rootSetBufferInfos[slot] = rootDescriptorBufferInfos[i];
+            rootSetWrites[slot] = rootDescriptorWrites[i];
+            rootSetWrites[slot].pBufferInfo = &rootSetBufferInfos[slot];
+        }
+
+        assert(rootSetIndex < rootSetLayout->rootSetLayouts.size());
+        VkDescriptorSet set = allocateRootDescriptorSet(rootSetLayout->rootSetLayouts[rootSetIndex]);
+        if (set == VK_NULL_HANDLE) {
+            return;
+        }
+
+        for (uint32_t i = 0; i < rootSetWriteCount; i++) {
+            rootSetWrites[i].dstSet = set;
+        }
+
+        vkUpdateDescriptorSets(queue->device->vk, rootSetWriteCount, rootSetWrites, 0, nullptr);
+        vkCmdBindDescriptorSets(vk, rootSetBindPoint, rootSetLayout->vk, rootSetIndex, 1, &set, 0, nullptr);
+    }
+
+    VkDescriptorSet VulkanCommandList::allocateRootDescriptorSet(VkDescriptorSetLayout setLayout) {
+        // Sets of up to MaxRootDescriptorWrites buffers, a pool's worth at a
+        // time; a full pool moves on to the next, made the first time it's
+        // needed and kept for the recordings after.
+        static constexpr uint32_t SetsPerPool = 1024;
+        while (true) {
+            if (rootSetPoolIndex == rootSetPools.size()) {
+                const VkDescriptorPoolSize poolSizes[] = {
+                    { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, SetsPerPool * MaxRootDescriptorWrites },
+                    { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, SetsPerPool * MaxRootDescriptorWrites },
+                };
+
+                VkDescriptorPoolCreateInfo poolInfo = {};
+                poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                poolInfo.maxSets = SetsPerPool;
+                poolInfo.poolSizeCount = uint32_t(std::size(poolSizes));
+                poolInfo.pPoolSizes = poolSizes;
+
+                VkDescriptorPool pool = VK_NULL_HANDLE;
+                VkResult res = vkCreateDescriptorPool(queue->device->vk, &poolInfo, nullptr, &pool);
+                if (res != VK_SUCCESS) {
+                    fprintf(stderr, "vkCreateDescriptorPool failed with error code 0x%X.\n", res);
+                    return VK_NULL_HANDLE;
+                }
+
+                rootSetPools.emplace_back(pool);
+            }
+
+            VkDescriptorSetAllocateInfo allocateInfo = {};
+            allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocateInfo.descriptorPool = rootSetPools[rootSetPoolIndex];
+            allocateInfo.descriptorSetCount = 1;
+            allocateInfo.pSetLayouts = &setLayout;
+
+            VkDescriptorSet set = VK_NULL_HANDLE;
+            VkResult res = vkAllocateDescriptorSets(queue->device->vk, &allocateInfo, &set);
+            if (res == VK_SUCCESS) {
+                return set;
+            }
+
+            if ((res != VK_ERROR_OUT_OF_POOL_MEMORY) && (res != VK_ERROR_FRAGMENTED_POOL)) {
+                fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
+                return VK_NULL_HANDLE;
+            }
+
+            rootSetPoolIndex++;
+        }
     }
 
     void VulkanCommandList::setRaytracingPipelineLayout(const RenderPipelineLayout *pipelineLayout) {
@@ -4487,6 +4604,7 @@ namespace plume {
         // Fill Vulkan-only capabilities.
         loadStoreOpNoneSupported = supportedOptionalExtensions.find(VK_EXT_LOAD_STORE_OP_NONE_EXTENSION_NAME) != supportedOptionalExtensions.end();
         pushDescriptorSupported = supportedOptionalExtensions.find(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME) != supportedOptionalExtensions.end();
+        rootDescriptorsAsSets = !pushDescriptorSupported || (physicalDeviceProperties.vendorID == 0x5143);
 
         if (!nullDescriptorSupported) {
             nullBuffer = createBuffer(RenderBufferDesc::DefaultBuffer(16, RenderBufferFlag::VERTEX));
